@@ -2,6 +2,7 @@ package dependency
 
 import (
 	"fmt"
+	"io"
 	"log"
 	"net/url"
 	"strings"
@@ -20,8 +21,9 @@ var (
 type VaultReadQuery struct {
 	stopCh chan struct{}
 
-	path   string
-	secret *Secret
+	path        string
+	queryValues url.Values
+	secret      *Secret
 
 	// vaultSecret is the actual Vault secret which we are renewing
 	vaultSecret *api.Secret
@@ -35,9 +37,15 @@ func NewVaultReadQuery(s string) (*VaultReadQuery, error) {
 		return nil, fmt.Errorf("vault.read: invalid format: %q", s)
 	}
 
+	secretURL, err := url.Parse(s)
+	if err != nil {
+		return nil, err
+	}
+
 	return &VaultReadQuery{
-		stopCh: make(chan struct{}, 1),
-		path:   s,
+		stopCh:      make(chan struct{}, 1),
+		path:        secretURL.Path,
+		queryValues: secretURL.Query(),
 	}, nil
 }
 
@@ -134,9 +142,9 @@ func (d *VaultReadQuery) Type() Type {
 func (d *VaultReadQuery) readSecret(clients *ClientSet, opts *QueryOptions) (*api.Secret, error) {
 	log.Printf("[TRACE] %s: GET %s", d, &url.URL{
 		Path:     "/v1/" + d.path,
-		RawQuery: opts.String(),
+		RawQuery: d.queryValues.Encode(),
 	})
-	vaultSecret, err := clients.Vault().Logical().Read(d.path)
+	vaultSecret, err := kvReadRequest(clients.Vault(), d.path, d.queryValues)
 	if err != nil {
 		return nil, errors.Wrap(err, d.String())
 	}
@@ -144,4 +152,36 @@ func (d *VaultReadQuery) readSecret(clients *ClientSet, opts *QueryOptions) (*ap
 		return nil, fmt.Errorf("no secret exists at %s", d.path)
 	}
 	return vaultSecret, nil
+}
+
+func kvReadRequest(client *api.Client, path string, params url.Values) (*api.Secret, error) {
+	r := client.NewRequest("GET", "/v1/"+path)
+	for k, values := range params {
+		for _, v := range values {
+			r.Params.Add(k, v)
+		}
+	}
+	resp, err := client.RawRequest(r)
+	if resp != nil {
+		defer resp.Body.Close()
+	}
+	if resp != nil && resp.StatusCode == 404 {
+		secret, parseErr := api.ParseSecret(resp.Body)
+		switch parseErr {
+		case nil:
+		case io.EOF:
+			return nil, nil
+		default:
+			return nil, err
+		}
+		if secret != nil && (len(secret.Warnings) > 0 || len(secret.Data) > 0) {
+			return secret, nil
+		}
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	return api.ParseSecret(resp.Body)
 }

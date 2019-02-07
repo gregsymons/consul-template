@@ -2,6 +2,7 @@ package dependency
 
 import (
 	"fmt"
+	"net/url"
 	"testing"
 	"time"
 
@@ -27,7 +28,8 @@ func TestNewVaultReadQuery(t *testing.T) {
 			"path",
 			"path",
 			&VaultReadQuery{
-				path: "path",
+				path:        "path",
+				queryValues: url.Values{},
 			},
 			false,
 		},
@@ -35,7 +37,8 @@ func TestNewVaultReadQuery(t *testing.T) {
 			"leading_slash",
 			"/leading/slash",
 			&VaultReadQuery{
-				path: "leading/slash",
+				path:        "leading/slash",
+				queryValues: url.Values{},
 			},
 			false,
 		},
@@ -43,7 +46,8 @@ func TestNewVaultReadQuery(t *testing.T) {
 			"trailing_slash",
 			"trailing/slash/",
 			&VaultReadQuery{
-				path: "trailing/slash",
+				path:        "trailing/slash",
+				queryValues: url.Values{},
 			},
 			false,
 		},
